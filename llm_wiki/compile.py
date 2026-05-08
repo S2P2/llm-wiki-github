@@ -72,7 +72,7 @@ def extract_keyphrases(text: str, max_phrases: int = 5) -> list[str]:
 
 def gather_context(raw_doc: Path, wiki_dir: Path, top_k: int = 5) -> list[Path]:
     """Find relevant existing wiki pages using ripgrep with Python fallback."""
-    keyphrases = extract_keyphrases(raw_doc.read_text())
+    keyphrases = extract_keyphrases(raw_doc.read_text(encoding="utf-8"))
     if not keyphrases or not wiki_dir.exists():
         return []
 
@@ -203,15 +203,15 @@ def apply_compilation(result: dict, wiki_dir: Path, index_path: Path) -> None:
             filename = Path(page["filename"]).name
             filepath = wiki_dir / filename
             filepath.parent.mkdir(parents=True, exist_ok=True)
-            filepath.write_text(page["content"])
+            filepath.write_text(page["content"], encoding="utf-8")
 
     patch = result.get("index_patch", "")
     if not patch:
         return
 
-    content = index_path.read_text()
+    content = index_path.read_text(encoding="utf-8")
     content = content.replace(COMPILE_INSERT_MARKER, f"{patch}\n{COMPILE_INSERT_MARKER}")
-    index_path.write_text(content)
+    index_path.write_text(content, encoding="utf-8")
 
 
 def main(argv: list[str] | None = None, *, root: Path | None = None) -> None:

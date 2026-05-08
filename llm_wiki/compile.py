@@ -212,3 +212,68 @@ def apply_compilation(result: dict, wiki_dir: Path, index_path: Path) -> None:
     content = index_path.read_text()
     content = content.replace(COMPILE_INSERT_MARKER, f"{patch}\n{COMPILE_INSERT_MARKER}")
     index_path.write_text(content)
+
+
+def main(argv: list[str] | None = None, *, root: Path | None = None) -> None:
+    """Compile raw documents into structured wiki pages."""
+    import argparse
+    import sys
+
+    parser = argparse.ArgumentParser(description="Compile raw documents into wiki pages")
+    parser.add_argument("files", nargs="+", help="Raw document paths to compile")
+    args = parser.parse_args(argv if argv is not None else sys.argv[1:])
+
+    project_root = root or Path.cwd()
+    wiki_dir = project_root / "wiki"
+    raw_dir = project_root / "raw"
+    index_path = wiki_dir / "index.md"
+    agents_path = project_root / "AGENTS.md"
+
+    if not agents_path.exists():
+        print(f"Error: {agents_path} not found", file=sys.stderr)
+        sys.exit(1)
+
+    system_prompt = agents_path.read_text(encoding="utf-8")
+    dry_run = os.environ.get("COMPILE_DRY_RUN", "").lower() == "true"
+
+    for raw_file in args.files:
+        raw_path = Path(raw_file)
+        if not raw_path.exists():
+            print(f"Error: {raw_path} not found", file=sys.stderr)
+            sys.exit(1)
+
+        context_pages = gather_context(raw_path, wiki_dir)
+        context_content = ""
+        if context_pages:
+            parts = [f"--- Existing wiki page: {p.name} ---\n{p.read_text(encoding='utf-8')}" for p in context_pages]
+            context_content = "\n\n".join(parts)
+
+        index_content = ""
+        if index_path.exists():
+            index_content = f"--- Current index.md ---\n{index_path.read_text(encoding='utf-8')}"
+
+        user_parts = [f"--- New source document ---\n{raw_path.read_text(encoding='utf-8')}"]
+        if context_content:
+            user_parts.append(context_content)
+        if index_content:
+            user_parts.append(index_content)
+        user_content = "\n\n".join(user_parts)
+
+        raw_response = call_llm(system_prompt, user_content)
+        result = parse_llm_response(raw_response)
+
+        errors = validate_pages(result, wiki_dir, raw_dir)
+        if errors:
+            for error in errors:
+                print(f"Validation error: {error}", file=sys.stderr)
+            sys.exit(1)
+
+        if dry_run:
+            print(json.dumps(result, indent=2))
+        else:
+            apply_compilation(result, wiki_dir, index_path)
+            print(
+                f"Compiled {raw_path.name} → {len(result.get('new_pages', []))} new, "
+                f"{len(result.get('updated_pages', []))} updated pages",
+                file=sys.stderr,
+            )

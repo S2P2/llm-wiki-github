@@ -1,0 +1,11 @@
+site_name: LLM Wiki
+site_url: https://S2P2.github.io/llm-wiki-github/
+docs_dir: wiki
+theme:
+  name: material
+  features:
+    - navigation.instant
+    - search.highlight
+plugins:
+  - search
+  - roamlinks

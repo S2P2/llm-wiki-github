@@ -1,11 +1,14 @@
 """Wiki compilation engine — transforms raw documents into structured wiki pages."""
 
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
 
+import anthropic
 import frontmatter
+from openai import OpenAI
 
 COMPILE_INSERT_MARKER = "<!-- COMPILE_INSERT_HERE -->"
 
@@ -116,3 +119,78 @@ def _py_search(pattern: str, wiki_dir: Path) -> list[tuple[Path, int]]:
         if count > 0:
             matches.append((md_file, count))
     return matches
+
+
+COMPILE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "new_pages": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "filename": {"type": "string"},
+                    "content": {"type": "string"},
+                },
+                "required": ["filename", "content"],
+            },
+        },
+        "updated_pages": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "filename": {"type": "string"},
+                    "content": {"type": "string"},
+                },
+                "required": ["filename", "content"],
+            },
+        },
+        "index_patch": {"type": "string"},
+    },
+    "required": ["new_pages", "updated_pages", "index_patch"],
+}
+
+LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "openai")
+
+
+def call_llm(system_prompt: str, user_content: str) -> str:
+    """Call LLM and return raw text response."""
+    max_tokens = int(os.environ.get("MAX_TOKENS", "16384"))
+    provider = os.environ.get("LLM_PROVIDER", "openai")
+
+    if provider == "anthropic":
+        client = anthropic.Anthropic()
+        response = client.messages.create(
+            model=os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-20250514"),
+            max_tokens=max_tokens,
+            tools=[
+                {
+                    "name": "compile_wiki",
+                    "description": "Compile wiki pages from raw source document",
+                    "input_schema": COMPILE_SCHEMA,
+                }
+            ],
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_content}],
+            tool_choice={"type": "tool", "name": "compile_wiki"},
+        )
+        for block in response.content:
+            if block.type == "tool_use":
+                return json.dumps(block.input)
+        raise RuntimeError("No tool_use block in Anthropic response")
+
+    client = OpenAI(
+        base_url=os.environ.get("OPENAI_BASE_URL"),
+        api_key=os.environ.get("OPENAI_API_KEY"),
+    )
+    response = client.chat.completions.create(
+        model=os.environ.get("OPENAI_MODEL", "gpt-4o"),
+        max_tokens=max_tokens,
+        response_format={"type": "json_object"},
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content},
+        ],
+    )
+    return response.choices[0].message.content

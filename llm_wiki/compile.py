@@ -194,3 +194,21 @@ def call_llm(system_prompt: str, user_content: str) -> str:
         ],
     )
     return response.choices[0].message.content
+
+
+def apply_compilation(result: dict, wiki_dir: Path, index_path: Path) -> None:
+    """Write compiled pages to disk and update index.md with new entries."""
+    for page_type in ("new_pages", "updated_pages"):
+        for page in result.get(page_type, []):
+            filename = Path(page["filename"]).name
+            filepath = wiki_dir / filename
+            filepath.parent.mkdir(parents=True, exist_ok=True)
+            filepath.write_text(page["content"])
+
+    patch = result.get("index_patch", "")
+    if not patch:
+        return
+
+    content = index_path.read_text()
+    content = content.replace(COMPILE_INSERT_MARKER, f"{patch}\n{COMPILE_INSERT_MARKER}")
+    index_path.write_text(content)
